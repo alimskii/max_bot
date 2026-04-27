@@ -14,7 +14,8 @@ import logging
 import tempfile
 import os
 from typing import Dict, Any, Set, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
+import locale
 
 from config import Config
 from directus_client import DirectusClient
@@ -29,6 +30,58 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+
+def format_date_ru(date_string: str) -> str:
+    """
+    Преобразует дату из формата ISO 8601 в читаемый русский формат.
+    
+    Args:
+        date_string: Дата в формате ISO 8601 (например, "2026-04-22T13:09:23.000Z")
+        
+    Returns:
+        Дата в русском формате (например, "22 апреля 2026 г. 13:09")
+    """
+    if not date_string or date_string == 'Не указано':
+        return 'Не указано'
+    
+    try:
+        # Парсим дату из ISO 8601
+        # Убираем миллисекунды и Z, если есть
+        date_string_clean = date_string.replace('Z', '+00:00')
+        
+        # Пробуем распарсить с разными форматами
+        if '.' in date_string_clean:
+            # С миллисекундами
+            dt = datetime.fromisoformat(date_string_clean)
+        else:
+            dt = datetime.fromisoformat(date_string_clean)
+        
+        # Конвертируем в московское время (UTC+3)
+        if dt.tzinfo:
+            dt = dt.astimezone(timezone.utc)
+            # Добавляем 3 часа для Москвы
+            from datetime import timedelta
+            dt = dt.replace(tzinfo=None) + timedelta(hours=3)
+        
+        # Форматируем на русском языке
+        month_names = {
+            1: 'января', 2: 'февраля', 3: 'марта', 4: 'апреля',
+            5: 'мая', 6: 'июня', 7: 'июля', 8: 'августа',
+            9: 'сентября', 10: 'октября', 11: 'ноября', 12: 'декабря'
+        }
+        
+        day = dt.day
+        month = month_names[dt.month]
+        year = dt.year
+        hour = dt.hour
+        minute = dt.minute
+        
+        return f"{day} {month} {year} г. {hour:02d}:{minute:02d}"
+        
+    except Exception as e:
+        logger.warning(f"Не удалось преобразовать дату '{date_string}': {e}")
+        return date_string
 
 
 class IncidentBot:
@@ -65,10 +118,17 @@ class IncidentBot:
         incident_number = incident.get('incident_number', 'Не указан')
         status = incident.get('status', 'Не указан')
         dispatcher_name = incident.get('dispatcher_name', 'Не указан')
-        request_at = incident.get('request_at', 'Не указано')
-        date_created = incident.get('date_created', 'Не указано')
-        sent_to_work_at = incident.get('sent_to_work_at', 'Не отправлено')
-        completed_at = incident.get('completed_at', 'Не завершена')
+        
+        # Форматируем даты в читаемый русский формат
+        request_at_raw = incident.get('request_at', 'Не указано')
+        date_created_raw = incident.get('date_created', 'Не указано')
+        sent_to_work_at_raw = incident.get('sent_to_work_at', 'Не отправлено')
+        completed_at_raw = incident.get('completed_at', 'Не завершена')
+        
+        request_at = format_date_ru(request_at_raw) if request_at_raw else 'Не указано'
+        date_created = format_date_ru(date_created_raw) if date_created_raw else 'Не указано'
+        sent_to_work_at = format_date_ru(sent_to_work_at_raw) if sent_to_work_at_raw else 'Не отправлено'
+        completed_at = format_date_ru(completed_at_raw) if completed_at_raw else 'Не завершена'
         
         # Формируем сообщение с Markdown форматированием
         message = f"""🚨 *Заявка #{incident_id}*
