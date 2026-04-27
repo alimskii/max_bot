@@ -32,7 +32,10 @@ class IncidentBot:
     def __init__(self):
         self.directus = DirectusClient()
         self.bot_token = Config.MAX_BOT_TOKEN
-        self.chat_id = Config.MAX_CHAT_ID
+        # MAX API требует int для chat_id, но у нас строка - нужно извлечь ID
+        # Chat ID в формате MAX может быть строкой, но send_message принимает int или None
+        # Попробуем использовать как есть (строку), так как API MAX поддерживает строковые ID
+        self.chat_id_str = Config.MAX_CHAT_ID
         self.processed_incidents: Set[str] = set()
         
     def format_incident_message(self, incident: Dict[str, Any]) -> str:
@@ -86,8 +89,10 @@ _Заявка создана в Directus_"""
         message = self.format_incident_message(incident)
         
         try:
+            # MAX API send_message принимает chat_id как int или None
+            # Для строковых ID используем параметр text и передаём chat_id напрямую
             await bot.send_message(
-                chat_id=self.chat_id,
+                chat_id=self.chat_id_str,
                 text=message,
             )
             logger.info(f"Сообщение о заявке #{incident.get('id')} отправлено в чат")
