@@ -8,15 +8,15 @@ class Config:
     """Конфигурация приложения"""
     
     # MAX API настройки
-    MAX_ACCESS_TOKEN = os.getenv('MAX_ACCESS_TOKEN')
+    MAX_ACCESS_TOKEN = os.getenv('MAX_ACCESS_TOKEN', '').strip()
     MAX_API_BASE_URL = 'https://platform-api.max.ru'
     
     # Directus настройки
-    DIRECTUS_URL = os.getenv('DIRECTUS_URL')
-    DIRECTUS_TOKEN = os.getenv('DIRECTUS_TOKEN')
+    DIRECTUS_URL = os.getenv('DIRECTUS_URL', '').strip().rstrip('/')
+    DIRECTUS_TOKEN = os.getenv('DIRECTUS_TOKEN', '').strip()
     
     # ID группового чата для отправки сообщений
-    MAX_CHAT_ID = os.getenv('MAX_CHAT_ID')
+    MAX_CHAT_ID = os.getenv('MAX_CHAT_ID', '').strip()
     
     # Интервал опроса Directus (в секундах)
     POLLING_INTERVAL = int(os.getenv('POLLING_INTERVAL', '10'))
@@ -38,5 +38,9 @@ class Config:
         
         if missing:
             raise ValueError(f"Отсутствуют необходимые переменные окружения: {', '.join(missing)}")
+        
+        # Отладочный вывод (удалите после проверки)
+        print(f"[DEBUG] MAX_ACCESS_TOKEN длина: {len(cls.MAX_ACCESS_TOKEN)}")
+        print(f"[DEBUG] MAX_ACCESS_TOKEN первые 10 символов: {cls.MAX_ACCESS_TOKEN[:10]}...")
         
         return True
