@@ -4,16 +4,18 @@ MAX Incident Bot
 
 Бот для отправки сообщений из Directus в групповой чат MAX.
 Мониторит коллекцию asudd_incidents и отправляет уведомления о новых заявках.
+Использует официальный SDK maxapi для работы с мессенджером MAX.
 """
 
+import asyncio
 import time
 import logging
-from typing import Dict, Any, Set, List
+from typing import Dict, Any, Set
 from datetime import datetime
 
 from config import Config
 from directus_client import DirectusClient
-from max_client import MAXClient
+from maxapi import Bot
 
 # Настройка логирования
 logging.basicConfig(
@@ -29,9 +31,9 @@ class IncidentBot:
     
     def __init__(self):
         self.directus = DirectusClient()
-        self.max_client = MAXClient()
-        self.processed_incidents: Set[str] = set()
+        self.bot_token = Config.MAX_BOT_TOKEN
         self.chat_id = Config.MAX_CHAT_ID
+        self.processed_incidents: Set[str] = set()
         
     def format_incident_message(self, incident: Dict[str, Any]) -> str:
         """
@@ -45,34 +47,37 @@ class IncidentBot:
         """
         # Получаем поля заявки (адаптируйте под вашу структуру коллекции)
         incident_id = incident.get('id', 'Не указан')
-        title = incident.get('title', incident.get('name', 'Без названия'))
-        description = incident.get('description', incident.get('text', 'Нет описания'))
+        incident_number = incident.get('incident_number', 'Не указан')
         status = incident.get('status', 'Не указан')
-        priority = incident.get('priority', 'Не указана')
-        created_at = incident.get('date_created', incident.get('created_at', 'Не указано'))
+        dispatcher_name = incident.get('dispatcher_name', 'Не указан')
+        request_at = incident.get('request_at', 'Не указано')
+        date_created = incident.get('date_created', 'Не указано')
+        sent_to_work_at = incident.get('sent_to_work_at', 'Не отправлено')
+        completed_at = incident.get('completed_at', 'Не завершена')
         
         # Формируем сообщение с Markdown форматированием
-        message = f"""🚨 *Новая заявка #{incident_id}*
+        message = f"""🚨 *Заявка #{incident_id}*
 
-*Заголовок:* {title}
-
-*Описание:*
-{description}
-
+*Номер заявки:* {incident_number}
 *Статус:* {status}
-*Приоритет:* {priority}
-*Дата создания:* {created_at}
+*Диспетчер:* {dispatcher_name}
+
+*Дата создания:* {date_created}
+*Время запроса:* {request_at}
+*Отправлено в работу:* {sent_to_work_at}
+*Завершена:* {completed_at}
 
 ---
 _Заявка создана в Directus_"""
         
         return message
     
-    def send_incident_notification(self, incident: Dict[str, Any]) -> bool:
+    async def send_incident_notification(self, bot: Bot, incident: Dict[str, Any]) -> bool:
         """
         Отправляет уведомление о заявке в групповой чат
         
         Args:
+            bot: Экземпляр бота MAX
             incident: Данные заявки
             
         Returns:
@@ -80,18 +85,15 @@ _Заявка создана в Directus_"""
         """
         message = self.format_incident_message(incident)
         
-        result = self.max_client.send_message(
-            chat_id=self.chat_id,
-            text=message,
-            format_type='markdown',
-            notify=True
-        )
-        
-        if result:
+        try:
+            await bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+            )
             logger.info(f"Сообщение о заявке #{incident.get('id')} отправлено в чат")
             return True
-        else:
-            logger.error(f"Не удалось отправить сообщение о заявке #{incident.get('id')}")
+        except Exception as e:
+            logger.error(f"Не удалось отправить сообщение о заявке #{incident.get('id')}: {e}")
             return False
     
     def mark_as_sent(self, incident_id: str):
@@ -102,14 +104,14 @@ _Заявка создана в Directus_"""
             incident_id: ID заявки
         """
         self.processed_incidents.add(incident_id)
-        
-        # Опционально: можно обновлять статус в Directus
-        # self.directus.update_incident(incident_id, {'sent_to_max': True})
     
-    def check_new_incidents(self) -> int:
+    async def check_new_incidents(self, bot: Bot) -> int:
         """
         Проверяет наличие новых заявок и отправляет уведомления
         
+        Args:
+            bot: Экземпляр бота MAX
+            
         Returns:
             Количество обработанных заявок
         """
@@ -129,7 +131,7 @@ _Заявка создана в Directus_"""
                 continue
             
             # Отправляем уведомление
-            if self.send_incident_notification(incident):
+            if await self.send_incident_notification(bot, incident):
                 self.mark_as_sent(incident_id)
                 new_count += 1
         
@@ -138,18 +140,27 @@ _Заявка создана в Directus_"""
         
         return new_count
     
-    def run(self):
+    async def run(self):
         """Запускает основной цикл работы бота"""
         logger.info("Запуск бота...")
         logger.info(f"Интервал опроса: {Config.POLLING_INTERVAL} сек.")
         logger.info(f"Чат для уведомлений: {self.chat_id}")
+        
+        bot = Bot(self.bot_token)
+        
+        # Удаляем существующие вебхуки для использования polling
+        try:
+            await bot.delete_webhook()
+            logger.info("Вебхук удалён для использования polling режима")
+        except Exception as e:
+            logger.warning(f"Не удалось удалить вебхук: {e}")
         
         try:
             while True:
                 start_time = time.time()
                 
                 try:
-                    self.check_new_incidents()
+                    await self.check_new_incidents(bot)
                 except Exception as e:
                     logger.error(f"Ошибка при проверке заявок: {e}")
                 
@@ -158,7 +169,7 @@ _Заявка создана в Directus_"""
                 sleep_time = max(0, Config.POLLING_INTERVAL - elapsed)
                 
                 if sleep_time > 0:
-                    time.sleep(sleep_time)
+                    await asyncio.sleep(sleep_time)
                     
         except KeyboardInterrupt:
             logger.info("Бот остановлен пользователем")
@@ -167,7 +178,7 @@ _Заявка создана в Directus_"""
             raise
 
 
-def main():
+async def main():
     """Точка входа приложения"""
     
     # Валидация конфигурации
@@ -180,10 +191,10 @@ def main():
     
     # Создание и запуск бота
     bot = IncidentBot()
-    bot.run()
+    await bot.run()
     
     return 0
 
 
 if __name__ == '__main__':
-    exit(main())
+    exit(asyncio.run(main()))

@@ -7,9 +7,8 @@ load_dotenv()
 class Config:
     """Конфигурация приложения"""
     
-    # MAX API настройки
-    MAX_ACCESS_TOKEN = os.getenv('MAX_ACCESS_TOKEN', '').strip()
-    MAX_API_BASE_URL = 'https://platform-api.max.ru'
+    # MAX API настройки (токен для SDK)
+    MAX_BOT_TOKEN = os.getenv('MAX_BOT_TOKEN', '').strip()
     
     # Directus настройки
     DIRECTUS_URL = os.getenv('DIRECTUS_URL', '').strip().rstrip('/')
@@ -28,7 +27,7 @@ class Config:
     def validate(cls):
         """Проверяет наличие всех необходимых настроек"""
         required_vars = [
-            ('MAX_ACCESS_TOKEN', cls.MAX_ACCESS_TOKEN),
+            ('MAX_BOT_TOKEN', cls.MAX_BOT_TOKEN),
             ('DIRECTUS_URL', cls.DIRECTUS_URL),
             ('DIRECTUS_TOKEN', cls.DIRECTUS_TOKEN),
             ('MAX_CHAT_ID', cls.MAX_CHAT_ID),
@@ -40,7 +39,7 @@ class Config:
             raise ValueError(f"Отсутствуют необходимые переменные окружения: {', '.join(missing)}")
         
         # Отладочный вывод (удалите после проверки)
-        print(f"[DEBUG] MAX_ACCESS_TOKEN длина: {len(cls.MAX_ACCESS_TOKEN)}")
-        print(f"[DEBUG] MAX_ACCESS_TOKEN первые 10 символов: {cls.MAX_ACCESS_TOKEN[:10]}...")
+        print(f"[DEBUG] MAX_BOT_TOKEN длина: {len(cls.MAX_BOT_TOKEN)}")
+        print(f"[DEBUG] MAX_BOT_TOKEN первые 10 символов: {cls.MAX_BOT_TOKEN[:10]}...")
         
         return True

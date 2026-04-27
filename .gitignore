@@ -1,1 +1,29 @@
-Nothing should be ignored based on the provided file changes. The only modified file is a Python source file (`max_incident_bot/max_client.py`), which should not be added to .gitignore.
+```
+# Environment variables
+.env
+.env.local
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.venv.bak/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.DS_Store
+Thumbs.db
+```
