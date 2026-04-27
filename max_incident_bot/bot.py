@@ -5,17 +5,22 @@ MAX Incident Bot
 Бот для отправки сообщений из Directus в групповой чат MAX.
 Мониторит коллекцию asudd_incidents и отправляет уведомления о новых заявках.
 Использует официальный SDK maxapi для работы с мессенджером MAX.
+Поддерживает отправку изображений вместе с текстовым сообщением.
 """
 
 import asyncio
 import time
 import logging
-from typing import Dict, Any, Set, Optional
+import tempfile
+import os
+from typing import Dict, Any, Set, Optional, List
 from datetime import datetime
 
 from config import Config
 from directus_client import DirectusClient
 from maxapi import Bot
+from maxapi.types import InputMedia
+from maxapi.enums.upload_type import UploadType
 
 # Настройка логирования
 logging.basicConfig(
@@ -44,7 +49,7 @@ class IncidentBot:
             logger.debug(f"Chat ID преобразован в int: {self.chat_id_int}")
         except (ValueError, TypeError):
             logger.debug(f"Chat ID не является числом, используем как строку: {self.chat_id_str}")
-        
+    
     def format_incident_message(self, incident: Dict[str, Any]) -> str:
         """
         Форматирует заявку в сообщение для отправки в MAX
@@ -84,7 +89,7 @@ _Заявка создана в Directus_"""
     
     async def send_incident_notification(self, bot: Bot, incident: Dict[str, Any]) -> bool:
         """
-        Отправляет уведомление о заявке в групповой чат
+        Отправляет уведомление о заявке в групповой чат (с изображением или без)
         
         Args:
             bot: Экземпляр бота MAX
@@ -94,6 +99,39 @@ _Заявка создана в Directus_"""
             True если успешно отправлено
         """
         message = self.format_incident_message(incident)
+        
+        # Проверяем наличие изображения в заявке
+        image_id = incident.get('image')  # Предполагаем, что поле называется 'image'
+        attachments: List[InputMedia] = []
+        
+        if image_id:
+            try:
+                # Получаем URL изображения из Directus
+                image_url = self.directus.get_asset_url(image_id)
+                logger.info(f"Попытка загрузить изображение: {image_url}")
+                
+                # Скачиваем изображение
+                image_data = self.directus.download_image(image_url)
+                
+                if image_data:
+                    # Создаем временный файл для изображения
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+                        tmp_file.write(image_data)
+                        tmp_path = tmp_file.name
+                    
+                    try:
+                        # Создаем InputMedia для изображения
+                        media = InputMedia(path=tmp_path, type=UploadType.IMAGE)
+                        attachments.append(media)
+                        logger.info(f"Изображение подготовлено для отправки: {tmp_path}")
+                    except Exception as e:
+                        logger.error(f"Ошибка при создании InputMedia: {e}")
+                        # Удаляем временный файл при ошибке
+                        os.unlink(tmp_path)
+                        raise
+            except Exception as e:
+                logger.warning(f"Не удалось загрузить изображение для заявки #{incident.get('id')}: {e}")
+                # Продолжаем отправку без изображения
         
         try:
             # MAX API SDK требует chat_id как int или None
@@ -106,6 +144,7 @@ _Заявка создана в Directus_"""
             await bot.send_message(
                 chat_id=chat_id_to_use,
                 text=message,
+                attachments=attachments if attachments else None,
             )
             logger.info(f"Сообщение о заявке #{incident.get('id')} отправлено в чат {chat_id_to_use}")
             return True
@@ -113,6 +152,16 @@ _Заявка создана в Directus_"""
             logger.error(f"Не удалось отправить сообщение о заявке #{incident.get('id')}: {e}")
             logger.debug(f"Chat ID str: {self.chat_id_str}, int: {self.chat_id_int}, Message length: {len(message)}")
             return False
+        finally:
+            # Очищаем временные файлы
+            for attachment in attachments:
+                try:
+                    if hasattr(attachment, 'path') and attachment.path:
+                        if os.path.exists(attachment.path):
+                            os.unlink(attachment.path)
+                            logger.debug(f"Временный файл удален: {attachment.path}")
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить временный файл: {e}")
     
     def mark_as_sent(self, incident_id: str):
         """

@@ -88,3 +88,33 @@ class DirectusClient:
         except requests.exceptions.RequestException as e:
             print(f"Ошибка при обновлении заявки {incident_id}: {e}")
             return False
+    
+    def download_image(self, image_url: str) -> Optional[bytes]:
+        """
+        Скачивает изображение по URL из Directus
+        
+        Args:
+            image_url: URL изображения
+            
+        Returns:
+            Байты изображения или None
+        """
+        try:
+            response = self.session.get(image_url)
+            response.raise_for_status()
+            return response.content
+        except requests.exceptions.RequestException as e:
+            print(f"Ошибка при скачивании изображения {image_url}: {e}")
+            return None
+    
+    def get_asset_url(self, image_id: str) -> str:
+        """
+        Получает URL изображения из Directus assets
+        
+        Args:
+            image_id: UUID изображения в Directus
+            
+        Returns:
+            Полный URL изображения
+        """
+        return f"{self.base_url}/assets/{image_id}"
