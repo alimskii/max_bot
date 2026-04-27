@@ -46,23 +46,18 @@ def format_date_ru(date_string: str) -> str:
         return 'Не указано'
     
     try:
+        from datetime import timedelta
+        
         # Парсим дату из ISO 8601
         # Убираем миллисекунды и Z, если есть
         date_string_clean = date_string.replace('Z', '+00:00')
         
         # Пробуем распарсить с разными форматами
-        if '.' in date_string_clean:
-            # С миллисекундами
-            dt = datetime.fromisoformat(date_string_clean)
-        else:
-            dt = datetime.fromisoformat(date_string_clean)
+        dt = datetime.fromisoformat(date_string_clean)
         
         # Конвертируем в московское время (UTC+3)
         if dt.tzinfo:
-            dt = dt.astimezone(timezone.utc)
-            # Добавляем 3 часа для Москвы
-            from datetime import timedelta
-            dt = dt.replace(tzinfo=None) + timedelta(hours=3)
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None) + timedelta(hours=3)
         
         # Форматируем на русском языке
         month_names = {
@@ -77,7 +72,9 @@ def format_date_ru(date_string: str) -> str:
         hour = dt.hour
         minute = dt.minute
         
-        return f"{day} {month} {year} г. {hour:02d}:{minute:02d}"
+        result = f"{day} {month} {year} г. {hour:02d}:{minute:02d}"
+        logger.debug(f"Преобразование даты: '{date_string}' -> '{result}'")
+        return result
         
     except Exception as e:
         logger.warning(f"Не удалось преобразовать дату '{date_string}': {e}")
@@ -163,8 +160,10 @@ _Заявка создана в Directus_"""
         # Проверяем наличие изображения в заявке
         image_id = incident.get('image')  # Предполагаем, что поле называется 'image'
         attachments: List[InputMedia] = []
+        tmp_path = None
         
         if image_id:
+            logger.info(f"Заявка #{incident.get('id')} имеет изображение: {image_id}")
             try:
                 # Получаем URL изображения из Directus
                 image_url = self.directus.get_asset_url(image_id)
@@ -174,24 +173,33 @@ _Заявка создана в Directus_"""
                 image_data = self.directus.download_image(image_url)
                 
                 if image_data:
+                    logger.info(f"Изображение загружено, размер: {len(image_data)} байт")
                     # Создаем временный файл для изображения
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
                         tmp_file.write(image_data)
                         tmp_path = tmp_file.name
                     
+                    logger.info(f"Временный файл создан: {tmp_path}")
+                    
                     try:
                         # Создаем InputMedia для изображения
                         media = InputMedia(path=tmp_path, type=UploadType.IMAGE)
                         attachments.append(media)
-                        logger.info(f"Изображение подготовлено для отправки: {tmp_path}")
+                        logger.info(f"Изображение подготовлено для отправки")
                     except Exception as e:
-                        logger.error(f"Ошибка при создании InputMedia: {e}")
+                        logger.error(f"Ошибка при создании InputMedia: {e}", exc_info=True)
                         # Удаляем временный файл при ошибке
-                        os.unlink(tmp_path)
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                            tmp_path = None
                         raise
+                else:
+                    logger.warning(f"Не удалось загрузить данные изображения")
             except Exception as e:
-                logger.warning(f"Не удалось загрузить изображение для заявки #{incident.get('id')}: {e}")
+                logger.warning(f"Не удалось загрузить изображение для заявки #{incident.get('id')}: {e}", exc_info=True)
                 # Продолжаем отправку без изображения
+        else:
+            logger.debug(f"Заявка #{incident.get('id')} не имеет изображения")
         
         try:
             # MAX API SDK требует chat_id как int или None
@@ -201,6 +209,8 @@ _Заявка создана в Directus_"""
             if chat_id_to_use is None:
                 logger.warning(f"Chat ID не является числом ({self.chat_id_str}), отправка может не сработать")
             
+            logger.info(f"Отправка сообщения с attachments={len(attachments) if attachments else 0}")
+            
             await bot.send_message(
                 chat_id=chat_id_to_use,
                 text=message,
@@ -209,7 +219,7 @@ _Заявка создана в Directus_"""
             logger.info(f"Сообщение о заявке #{incident.get('id')} отправлено в чат {chat_id_to_use}")
             return True
         except Exception as e:
-            logger.error(f"Не удалось отправить сообщение о заявке #{incident.get('id')}: {e}")
+            logger.error(f"Не удалось отправить сообщение о заявке #{incident.get('id')}: {e}", exc_info=True)
             logger.debug(f"Chat ID str: {self.chat_id_str}, int: {self.chat_id_int}, Message length: {len(message)}")
             return False
         finally:
