@@ -11,8 +11,9 @@ class MAXClient:
         self.token = Config.MAX_ACCESS_TOKEN
         
         self.session = requests.Session()
+        # MAX API требует токен в заголовке X-Access-Token
         self.session.headers.update({
-            'Authorization': f'Bearer {self.token}',
+            'X-Access-Token': self.token,
             'Content-Type': 'application/json'
         })
     
