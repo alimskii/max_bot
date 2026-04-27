@@ -10,7 +10,7 @@ MAX Incident Bot
 import asyncio
 import time
 import logging
-from typing import Dict, Any, Set
+from typing import Dict, Any, Set, Optional
 from datetime import datetime
 
 from config import Config
@@ -19,7 +19,7 @@ from maxapi import Bot
 
 # Настройка логирования
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
@@ -32,11 +32,18 @@ class IncidentBot:
     def __init__(self):
         self.directus = DirectusClient()
         self.bot_token = Config.MAX_BOT_TOKEN
-        # MAX API требует int для chat_id, но у нас строка - нужно извлечь ID
-        # Chat ID в формате MAX может быть строкой, но send_message принимает int или None
-        # Попробуем использовать как есть (строку), так как API MAX поддерживает строковые ID
-        self.chat_id_str = Config.MAX_CHAT_ID
+        # Chat ID в формате MAX - строка, но SDK требует int или None
+        # Сохраняем как есть, преобразование попробуем позже
+        self.chat_id_str: str = Config.MAX_CHAT_ID
+        self.chat_id_int: Optional[int] = None
         self.processed_incidents: Set[str] = set()
+        
+        # Пробуем преобразовать chat_id в int, если это возможно
+        try:
+            self.chat_id_int = int(self.chat_id_str)
+            logger.debug(f"Chat ID преобразован в int: {self.chat_id_int}")
+        except (ValueError, TypeError):
+            logger.debug(f"Chat ID не является числом, используем как строку: {self.chat_id_str}")
         
     def format_incident_message(self, incident: Dict[str, Any]) -> str:
         """
@@ -89,16 +96,22 @@ _Заявка создана в Directus_"""
         message = self.format_incident_message(incident)
         
         try:
-            # MAX API send_message принимает chat_id как int или None
-            # Для строковых ID используем параметр text и передаём chat_id напрямую
+            # MAX API SDK требует chat_id как int или None
+            # Используем преобразованный int, если удалось, иначе None (отправка в личный чат)
+            chat_id_to_use = self.chat_id_int
+            
+            if chat_id_to_use is None:
+                logger.warning(f"Chat ID не является числом ({self.chat_id_str}), отправка может не сработать")
+            
             await bot.send_message(
-                chat_id=self.chat_id_str,
+                chat_id=chat_id_to_use,
                 text=message,
             )
-            logger.info(f"Сообщение о заявке #{incident.get('id')} отправлено в чат")
+            logger.info(f"Сообщение о заявке #{incident.get('id')} отправлено в чат {chat_id_to_use}")
             return True
         except Exception as e:
             logger.error(f"Не удалось отправить сообщение о заявке #{incident.get('id')}: {e}")
+            logger.debug(f"Chat ID str: {self.chat_id_str}, int: {self.chat_id_int}, Message length: {len(message)}")
             return False
     
     def mark_as_sent(self, incident_id: str):
@@ -149,7 +162,7 @@ _Заявка создана в Directus_"""
         """Запускает основной цикл работы бота"""
         logger.info("Запуск бота...")
         logger.info(f"Интервал опроса: {Config.POLLING_INTERVAL} сек.")
-        logger.info(f"Чат для уведомлений: {self.chat_id}")
+        logger.info(f"Чат для уведомлений: {self.chat_id_str} (int: {self.chat_id_int})")
         
         bot = Bot(self.bot_token)
         
