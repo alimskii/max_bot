@@ -13,7 +13,7 @@ import time
 import logging
 import tempfile
 import os
-from typing import Dict, Any, Set, Optional, List
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 import locale
 
@@ -91,7 +91,8 @@ class IncidentBot:
         # Сохраняем как есть, преобразование попробуем позже
         self.chat_id_str: str = Config.MAX_CHAT_ID
         self.chat_id_int: Optional[int] = None
-        self.processed_incidents: Set[str] = set()
+        # Храним ID обработанных заявок и их последние статусы
+        self.processed_incidents: Dict[str, Optional[str]] = {}
         
         # Пробуем преобразовать chat_id в int, если это возможно
         try:
@@ -100,12 +101,13 @@ class IncidentBot:
         except (ValueError, TypeError):
             logger.debug(f"Chat ID не является числом, используем как строку: {self.chat_id_str}")
     
-    def format_incident_message(self, incident: Dict[str, Any]) -> str:
+    def format_incident_message(self, incident: Dict[str, Any], status_changed: bool = False) -> str:
         """
         Форматирует заявку в сообщение для отправки в MAX
         
         Args:
             incident: Данные заявки из Directus
+            status_changed: Флаг изменения статуса (для добавления префикса)
             
         Returns:
             Отформатированное сообщение
@@ -128,8 +130,16 @@ class IncidentBot:
         sent_to_work_at = format_date_ru(sent_to_work_at_raw) if sent_to_work_at_raw else 'Не отправлено'
         completed_at = format_date_ru(completed_at_raw) if completed_at_raw else 'Не завершена'
         
+        # Добавляем префикс в зависимости от типа уведомления
+        if status_changed:
+            emoji = "🔄"
+            title = f"Статус заявки {incident_id} изменён"
+        else:
+            emoji = "🚨"
+            title = f"Новая заявка {incident_id}"
+        
         # Формируем сообщение с Markdown форматированием
-        message = f"""🚨 Заявка {incident_id}
+        message = f"""{emoji} {title}
 
 Номер заявки: {incident_number}
 Статус: {status}
@@ -145,18 +155,19 @@ class IncidentBot:
         
         return message
     
-    async def send_incident_notification(self, bot: Bot, incident: Dict[str, Any]) -> bool:
+    async def send_incident_notification(self, bot: Bot, incident: Dict[str, Any], status_changed: bool = False) -> bool:
         """
         Отправляет уведомление о заявке в групповой чат (с изображением или без)
         
         Args:
             bot: Экземпляр бота MAX
             incident: Данные заявки
+            status_changed: Флаг изменения статуса
             
         Returns:
             True если успешно отправлено
         """
-        message = self.format_incident_message(incident)
+        message = self.format_incident_message(incident, status_changed=status_changed)
         
         # Проверяем наличие изображения в заявке
         image_id = incident.get('incidents_photo')
@@ -234,14 +245,15 @@ class IncidentBot:
                 except Exception as e:
                     logger.warning(f"Не удалось удалить временный файл: {e}")
     
-    def mark_as_sent(self, incident_id: str):
+    def mark_as_sent(self, incident_id: str, status: Optional[str] = None):
         """
-        Помечает заявку как отправленную
+        Помечает заявку как отправленную и сохраняет её статус
         
         Args:
             incident_id: ID заявки
+            status: Текущий статус заявки
         """
-        self.processed_incidents.add(incident_id)
+        self.processed_incidents[incident_id] = status
     
     async def check_new_incidents(self, bot: Bot) -> int:
         """
@@ -263,18 +275,28 @@ class IncidentBot:
         
         for incident in incidents:
             incident_id = str(incident.get('id'))
+            current_status = incident.get('status')
             
-            # Пропускаем уже обработанные заявки
+            # Проверяем, была ли заявка уже обработана
             if incident_id in self.processed_incidents:
+                # Заявка уже обработана, проверяем изменение статуса
+                previous_status = self.processed_incidents.get(incident_id)
+                
+                if current_status != previous_status:
+                    # Статус изменился - отправляем уведомление
+                    logger.info(f"Заявка #{incident_id}: статус изменился с '{previous_status}' на '{current_status}'")
+                    if await self.send_incident_notification(bot, incident, status_changed=True):
+                        self.mark_as_sent(incident_id, current_status)
+                        new_count += 1
                 continue
             
-            # Отправляем уведомление
-            if await self.send_incident_notification(bot, incident):
-                self.mark_as_sent(incident_id)
+            # Новая заявка - отправляем уведомление
+            if await self.send_incident_notification(bot, incident, status_changed=False):
+                self.mark_as_sent(incident_id, current_status)
                 new_count += 1
         
         if new_count > 0:
-            logger.info(f"Обработано новых заявок: {new_count}")
+            logger.info(f"Обработано заявок: {new_count}")
         
         return new_count
     
