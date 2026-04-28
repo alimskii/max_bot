@@ -115,6 +115,7 @@ class IncidentBot:
         incident_number = incident.get('incident_number', 'Не указан')
         status = incident.get('status', 'Не указан')
         dispatcher_name = incident.get('dispatcher_name', 'Не указан')
+        engineer_id = incident.get('engineer_id', 'Не указан')
         
         # Форматируем даты в читаемый русский формат
         request_at_raw = incident.get('request_at', 'Не указано')
@@ -128,19 +129,19 @@ class IncidentBot:
         completed_at = format_date_ru(completed_at_raw) if completed_at_raw else 'Не завершена'
         
         # Формируем сообщение с Markdown форматированием
-        message = f"""🚨 *Заявка #{incident_id}*
+        message = f"""🚨 Заявка {incident_id}
 
-*Номер заявки:* {incident_number}
-*Статус:* {status}
-*Диспетчер:* {dispatcher_name}
+Номер заявки: {incident_number}
+Статус: {status}
+Диспетчер: {dispatcher_name}
+Инженер: {engineer_id}
 
-*Дата создания:* {date_created}
-*Время запроса:* {request_at}
-*Отправлено в работу:* {sent_to_work_at}
-*Завершена:* {completed_at}
+Дата создания: {date_created}
+Время запроса: {request_at}
+Отправлено в работу: {sent_to_work_at}
+Завершена: {completed_at}
 
----
-_Заявка создана в Directus_"""
+"""
         
         return message
     
@@ -158,7 +159,7 @@ _Заявка создана в Directus_"""
         message = self.format_incident_message(incident)
         
         # Проверяем наличие изображения в заявке
-        image_id = incident.get('image')  # Предполагаем, что поле называется 'image'
+        image_id = incident.get('incidents_photo')
         attachments: List[InputMedia] = []
         tmp_path = None
         
